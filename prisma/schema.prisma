@@ -1,0 +1,180 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Role {
+  id          Int          @id @default(autoincrement())
+  createdAt   DateTime     @default(now())
+  isDeleted   Boolean      @default(false)
+  roleDetails RoleDetails?
+  userRole    UserRole[]
+}
+
+model RoleDetails {
+  id     Int    @id @default(autoincrement())
+  roleId Int    @unique
+  name   String
+  role   Role   @relation(fields: [roleId], references: [id])
+}
+
+model UserRole {
+  id     Int  @id @default(autoincrement())
+  roleId Int
+  userId Int  @unique
+  role   Role @relation(fields: [roleId], references: [id])
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id             Int             @id @default(autoincrement())
+  createdAt      DateTime        @default(now())
+  isDeleted      Boolean         @default(false)
+  shopDetails    ShopDetails[]
+  userCredential UserCredential?
+  userDetails    UserDetails?
+  userRole       UserRole?
+}
+
+model UserDetails {
+  id     Int    @id @default(autoincrement())
+  fname  String
+  lname  String
+  nname  String
+  userId Int    @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserCredential {
+  id       Int    @id @default(autoincrement())
+  password String
+  username String @unique
+  userId   Int    @unique
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Product {
+  id              Int               @id @default(autoincrement())
+  createdAt       DateTime          @default(now())
+  isDeleted       Boolean           @default(false)
+  deliveryDetails DeliveryDetails[]
+  item            Item[]
+  orderItem       OrderItem[]
+  priceList       PriceList?
+  productDetails  ProductDetails?
+}
+
+model ProductDetails {
+  id           Int     @id @default(autoincrement())
+  productId    Int     @unique
+  commonName   String
+  originalName String
+  product      Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model PriceList {
+  id        Int     @id @default(autoincrement())
+  productId Int     @unique
+  price     Price[]
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Price {
+  id          Int       @id @default(autoincrement())
+  priceListId Int
+  price       Float     @default(0.0)
+  isDeleted   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  priceList   PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+}
+
+model Item {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  isDeleted Boolean  @default(false)
+  quantity  Int      @default(0)
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Delivery {
+  id              Int              @id @default(autoincrement())
+  createdAt       DateTime         @default(now())
+  isDeleted       Boolean          @default(false)
+  deliveryDetails DeliveryDetails?
+}
+
+model DeliveryDetails {
+  id           Int      @id @default(autoincrement())
+  deliveryId   Int      @unique
+  productId    Int
+  quantity     Int
+  deliveryDate DateTime @default(now())
+  brand        String
+  delivery     Delivery @relation(fields: [deliveryId], references: [id])
+  product      Product  @relation(fields: [productId], references: [id])
+}
+
+model Shop {
+  id           Int            @id @default(autoincrement())
+  createdAt    DateTime       @default(now())
+  isDeleted    Boolean        @default(false)
+  orderDetails OrderDetails[]
+  shopDetails  ShopDetails?
+  transaction  Transaction[]
+}
+
+model ShopDetails {
+  id     Int    @id @default(autoincrement())
+  shopId Int    @unique
+  name   String
+  userId Int  
+  shop   Shop   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+model Transaction {
+  id              Int      @id @default(autoincrement())
+  createdAt       DateTime @default(now())
+  isDeleted       Boolean  @default(false)
+  shopId          Int
+  status          Int      @default(0)
+  transactionDate DateTime @default(now())
+  order           Order[]
+  shop            Shop     @relation(fields: [shopId], references: [id])
+}
+
+model Order {
+  id            Int           @id @default(autoincrement())
+  createdAt     DateTime      @default(now())
+  isDeleted     Boolean       @default(false)
+  transactionId Int
+  transaction   Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  orderDetails  OrderDetails?
+  orderItem     OrderItem[]
+}
+
+model OrderDetails {
+  id        Int      @id @default(autoincrement())
+  orderId   Int      @unique
+  orderDate DateTime @default(now())
+  status    Int      @default(0)
+  shopId    Int
+  type      Int      @default(0)
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shop      Shop     @relation(fields: [shopId], references: [id])
+}
+
+model OrderItem {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  isDeleted Boolean  @default(false)
+  productId Int
+  quantity  Int
+  orderId   Int
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id])
+}
