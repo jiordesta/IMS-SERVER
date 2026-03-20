@@ -15,14 +15,19 @@ async function bootstrap() {
       }),
     );
 
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'https://ims-client-xi.vercel.app',
+    ];
+
     app.enableCors({
-      origin: process.env.CLIENT_URL,
+      origin: allowedOrigins,
       credentials: true,
     });
 
     await app.listen(process.env.PORT || 3000);
 
-    console.log(`Allowed origins: ${process.env.CLIENT_URL}`);
+    //console.log(`Allowed origins: ${process.env.CLIENT_URL}`);
     console.log(`Application is running on: ${await app.getUrl()}`);
   } catch (error) {
     console.error(`Failed to start application: ${error.message}`);
