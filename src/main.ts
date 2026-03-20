@@ -7,14 +7,16 @@ async function bootstrap() {
   try {
     const app = await NestFactory.create(AppModule);
 
-    app.useGlobalPipes(new ValidationPipe({
-      whitelist: true,  
-      forbidNonWhitelisted: true, // throws error for unknown props
-      transform: true,          // auto-transform payloads into DTO classes
-    }));
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true, // throws error for unknown props
+        transform: true, // auto-transform payloads into DTO classes
+      }),
+    );
 
     app.enableCors({
-      origin: 'http://localhost:5173',
+      origin: process.env.CLIENT_URL,
       credentials: true,
     });
 
