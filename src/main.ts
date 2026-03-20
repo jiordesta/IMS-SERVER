@@ -10,14 +10,35 @@ async function bootstrap() {
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
-        forbidNonWhitelisted: true, // throws error for unknown props
-        transform: true, // auto-transform payloads into DTO classes
+        forbidNonWhitelisted: true,
+        transform: true,
       }),
     );
 
+    const allowedOrigin = process.env.CLIENT_URL;
+    console.log('CLIENT_URL:', allowedOrigin);
+
     app.enableCors({
-      // origin: process.env.CLIENT_URL,
-      // credentials: true,
+      origin: (origin, callback) => {
+        console.log('Incoming Origin:', origin);
+
+        // allow requests with no origin (like Thunder Client, Postman)
+        if (!origin) return callback(null, true);
+
+        if (origin === allowedOrigin) {
+          return callback(null, true);
+        }
+
+        console.error(`❌ CORS BLOCKED for origin: ${origin}`);
+        return callback(new Error(`Not allowed by CORS: ${origin}`), false);
+      },
+      credentials: true,
+    });
+
+    // 👇 Log all incoming requests (including OPTIONS preflight)
+    app.use((req, res, next) => {
+      console.log(`[${req.method}] ${req.url}`);
+      next();
     });
 
     await app.listen(process.env.PORT || 3000);
