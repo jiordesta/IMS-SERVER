@@ -1,0 +1,287 @@
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { prisma } from 'src/libs/db/client';
+import { OrderStatus, Roles, TransactionStatus } from 'src/libs/enums';
+import { isUserAuthorized } from 'src/libs/utils/validation';
+import { PrismaService } from 'src/prisma/prisma.service';
+
+@Injectable()
+export class TransactionService {
+  constructor(private readonly prismaService: PrismaService) {}
+
+  async fetchAllTransactions(user: any, filters: any) {
+    const isAuthorized = isUserAuthorized([Roles.SUPER_ADMIN], user);
+    if (!isAuthorized) throw new UnauthorizedException('Unauthorized');
+
+    try {
+      const transactions = await prisma.transaction.findMany({
+        where: {
+          isDeleted: false,
+          transactionDate: filters.date,
+          shopId: filters.shopId ? parseInt(filters.shopId) : undefined,
+          status: filters.status ? parseInt(filters.status) : undefined,
+        },
+        include: {
+          shop: {
+            include: {
+              shopDetails: true,
+            },
+          },
+          order: {
+            include: {
+              orderDetails: true,
+              orderItem: {
+                include: {
+                  product: {
+                    include: {
+                      productDetails: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      return transactions.map((transaction) => {
+        const orderItems =
+          transaction?.order
+            ?.filter(
+              (order) => order?.orderDetails?.status === OrderStatus.COMPLETED,
+            )
+            .flatMap(
+              (order) =>
+                order?.orderItem?.map((item) => ({
+                  productName: item?.product?.productDetails?.commonName,
+                  quantity: item?.quantity,
+                })) ?? [],
+            ) ?? [];
+
+        const combined = Object.values(
+          orderItems.reduce(
+            (acc, item) => {
+              if (!item.productName) return acc;
+
+              const key = item.productName;
+
+              if (!acc[key]) {
+                acc[key] = { ...item };
+              } else {
+                acc[key].quantity += item.quantity;
+              }
+
+              return acc;
+            },
+            {} as Record<string, (typeof orderItems)[number]>,
+          ),
+        );
+
+        const totalItems = orderItems.reduce(
+          (sum, item) => sum + (item.quantity ?? 0),
+          0,
+        );
+
+        return {
+          id: transaction.id,
+          status: transaction.status,
+          transactionDate: transaction.transactionDate,
+          createdAt: transaction.createdAt,
+          isDeleted: transaction.isDeleted,
+          shopDetails: transaction?.shop?.shopDetails,
+          orderItems: combined,
+          totalItems,
+        };
+      });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  async setTransactionAsDone(user: any, transactionIds: number[]) {
+    const isAuthorized = isUserAuthorized([Roles.SUPER_ADMIN], user);
+    if (!isAuthorized) throw new UnauthorizedException('Unauthorized');
+
+    try {
+      await this.prismaService.$transaction(
+        async (transaction) => {
+          const actions: any[] = [];
+          for (const transactionId of transactionIds) {
+            let dailyTransaction = await transaction.transaction.findFirst({
+              where: {
+                isDeleted: false,
+                id: transactionId,
+                status: TransactionStatus.PENDING,
+                // order: {
+                //   some: {
+                //     orderDetails: {
+                //       is: {
+                //         status: OrderStatus.COMPLETED,
+                //       },
+                //     },
+                //   },
+                // },
+              },
+              include: {
+                shop: true,
+                order: {
+                  include: {
+                    orderItem: true,
+                    orderDetails: true,
+                  },
+                },
+              },
+            });
+
+            if (!dailyTransaction)
+              throw new Error('Transaction does not exist');
+
+            const pendingOrders = dailyTransaction?.order.filter(
+              (order) => order?.orderDetails?.status === OrderStatus.PENDING,
+            );
+
+            if (pendingOrders.length !== 0) {
+              throw new Error(`Pending Orders detected`);
+            }
+
+            const orderItems = dailyTransaction?.order?.flatMap(
+              (order) =>
+                order?.orderItem?.map((item) => ({
+                  productId: item?.productId,
+                  quantity: item?.quantity,
+                  type: order?.orderDetails?.type,
+                  orderId: order?.id,
+                })) ?? [],
+            );
+
+            for (const orderItem of orderItems) {
+              const product = await transaction.product.findFirst({
+                where: {
+                  id: orderItem.productId,
+                  item: {
+                    some: {
+                      isDeleted: false,
+                      quantity: { gt: 0 },
+                    },
+                  },
+                },
+                include: {
+                  item: {
+                    where: {
+                      isDeleted: false,
+                      quantity: { gt: 0 },
+                    },
+                    orderBy: {
+                      createdAt: 'asc',
+                    },
+                  },
+                  productDetails: true,
+                },
+              });
+
+              if (!product) throw new Error('Product does not exist');
+
+              let orderItemQuantity = orderItem.quantity;
+
+              const inventoryItems = product?.item;
+
+              for (const inventoryItem of inventoryItems) {
+                const inventoryItemStocks = inventoryItem.quantity;
+
+                if (
+                  inventoryItemStocks > 0 &&
+                  inventoryItemStocks >= orderItemQuantity
+                ) {
+                  const newQuantity = inventoryItemStocks - orderItemQuantity;
+
+                  actions.push(
+                    transaction.item.update({
+                      where: {
+                        id: inventoryItem.id,
+                      },
+                      data: {
+                        quantity: newQuantity,
+                      },
+                    }),
+                  );
+
+                  if (newQuantity === 0) {
+                    actions.push(
+                      transaction.item.update({
+                        where: {
+                          id: inventoryItem.id,
+                        },
+                        data: {
+                          isDeleted: true,
+                        },
+                      }),
+                    );
+                  }
+
+                  orderItemQuantity = 0;
+
+                  break;
+                } else if (
+                  inventoryItemStocks > 0 &&
+                  inventoryItemStocks < orderItemQuantity
+                ) {
+                  orderItemQuantity -= inventoryItemStocks;
+
+                  actions.push(
+                    transaction.item.update({
+                      where: {
+                        id: inventoryItem.id,
+                      },
+                      data: {
+                        quantity: 0,
+                        isDeleted: true,
+                      },
+                    }),
+                  );
+                }
+              }
+
+              actions.push(
+                transaction.transaction.update({
+                  where: {
+                    id: dailyTransaction.id,
+                  },
+                  data: {
+                    status: TransactionStatus.COMPLETED,
+                  },
+                }),
+              );
+
+              // actions.push(
+              //   transaction.orderDetails.updateMany({
+              //     where: {
+              //       orderId: orderItem.orderId,
+              //     },
+              //     data: {
+              //       status: OrderStatus.COMPLETED,
+              //     },
+              //   }),
+              // );
+
+              if (orderItemQuantity === 0) {
+                await Promise.all(actions);
+              } else {
+                throw new Error('NEED TO INPUT THE DELIVERY');
+              }
+            }
+          }
+        },
+        { timeout: 1200000 },
+      );
+      return true;
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+}
